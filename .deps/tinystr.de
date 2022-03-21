@@ -1,0 +1,2 @@
+tinystr.o: src/util/tinyxml/tinystr.cpp \
+ include/despot/util/tinyxml/tinystr.h

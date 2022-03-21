@@ -1,0 +1,2 @@
+variable.o: src/pomdpx/parser/variable.cpp \
+ include/despot/pomdpx/parser/variable.h include/despot/util/util.h
