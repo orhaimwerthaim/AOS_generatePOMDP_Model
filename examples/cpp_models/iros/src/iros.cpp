@@ -10,6 +10,7 @@
 #include <cmath> 
 #include <despot/util/mongoDB_Bridge.h>
 #include <functional> //for std::hash
+#include <set>
 
 using namespace std;
 
@@ -23,7 +24,7 @@ bool AOSUtils::Bernoulli(double p)
 	int randInt = rand() % 100 + 1;
 	return (p * 100) >= randInt;
 }
-
+std::hash<std::string> Iros::hasher;
 /* ==============================================================================
  *IrosBelief class
  * ==============================================================================*/
@@ -194,18 +195,300 @@ State* Iros::CreateStartState(string type) const {
     return startState;
 }
 
+struct state_tran
+{
+    int state;
+    map<int,int> total_samplesFromStateByAction;
+    map<int,int> total_samplesToStateByAction;
+    map<std::pair<int,int>, int> actionObservationCount;//when arriving to this state by action and observation
+    map<std::pair<int,int>, int> actionNextStateCount;//when arriving to next state by action
+    
+    map<std::pair<int,int>, double> actionObservationProb;
+    map<std::pair<int,int>, double> actionNextStateProb;
+    bool isTerminalState = false;
 
+    void addObservationAsNextStateSample(int _nextState, int _obs, int _action)
+    {
+        if(_nextState != state)
+            return;
+
+        auto actIt = total_samplesToStateByAction.find(_action);
+        total_samplesToStateByAction[_action] = (actIt == total_samplesToStateByAction.end()) ? 1 : total_samplesToStateByAction[_action] + 1;
+
+        std::pair<int, int> actObsP{_action, _obs};
+        auto it = actionObservationCount.find(actObsP);
+          state_tran *st = NULL;
+          actionObservationCount[actObsP] = (it == actionObservationCount.end()) ? 1 : actionObservationCount[actObsP] + 1; 
+          
+    }
+
+    void addNextStateTransition(int _state, int next_state, int _action)
+      {
+          if(_state != state)
+            return;
+
+
+          auto actIt = total_samplesFromStateByAction.find(_action);
+        total_samplesFromStateByAction[_action] = (actIt == total_samplesFromStateByAction.end()) ? 1 : total_samplesFromStateByAction[_action] + 1;
+ 
+          std::pair<int, int> actNextStateP{_action, next_state};
+          auto it = actionNextStateCount.find(actNextStateP);
+          state_tran *st = NULL;
+          actionNextStateCount[actNextStateP] = (it == actionNextStateCount.end()) ? 1 : actionNextStateCount[actNextStateP] + 1;
+      }
+
+      void calcModelBySamples() 
+      {
+            for (auto const& x : actionNextStateCount)
+            {
+
+                actionNextStateProb.insert({x.first, ((double)x.second/total_samplesFromStateByAction[x.first.first])});
+            }
+
+            for (auto const& x : actionObservationCount)
+            {
+
+                actionObservationProb.insert({x.first, ((double)x.second/total_samplesToStateByAction[x.first.first])});
+            }
+      }
+};
+
+struct model_data
+  {
+      map<std::pair<int,int>,double> actionNextStateReward; 
+
+      map<int, state_tran> statesModel;
+      map<int, std::string> statesToPomdpFileStates;
+
+      void addSample(int state, int nextState, int action, int observation, double reward, bool isNextStateTerminal) 
+      {
+          actionNextStateReward.insert({std::pair<int,int>{action, nextState}, reward});
+          state_tran *st = getStateModel(state);
+          state_tran *n_st = getStateModel(nextState);
+          n_st->isTerminalState = isNextStateTerminal;
+          st->addNextStateTransition(state, nextState, action);
+          n_st->addObservationAsNextStateSample(nextState, observation, action);
+      }
+
+      state_tran * getStateModel(int state)
+      {
+          auto it = statesModel.find(state);
+          state_tran *st = NULL;
+          if (it == statesModel.end())
+          {
+              st = new state_tran;
+              st->state = state;
+              statesModel.insert({state, *st});
+
+              statesToPomdpFileStates[state] =  std::to_string(statesToPomdpFileStates.size()).insert(0,"s_");
+          }
+          else
+          {
+              st = &(it->second);
+          }
+          return st;
+      }
+
+      void calcModelBySamples() 
+      {
+          for (auto & x : statesModel)
+            {
+
+                x.second.calcModelBySamples();
+            }
+      }
+  };
+
+void Iros::CreateModel() const
+{
+
+    memory_pool_.DeleteAll();
+    int horizon = 10;
+    int numOfSamplesForEachActionFromState = 50;
+    model_data modelD;
+    std::set<int> states;
+    std::set<int> observations;
+    std::map<int, State*> statesToProcessNext;
+    std::map<int, State*> statesToProcessCurr;
+    std::map<int, std::string> actionsToDesc;
+    std::map<int, std::string> observationsToDesc;
+
+    for (int i = 0; i < ActionManager::actions.size();i++)
+    {
+        std::string temp = Prints::PrintActionDescription(ActionManager::actions[i]);
+        std::replace( temp.begin(), temp.end(), ':', '_');
+        std::replace( temp.begin(), temp.end(), ',', '_');
+        std::replace( temp.begin(), temp.end(), ' ', '_');
+        temp.insert(0, "a_");
+        actionsToDesc.insert({i, temp});
+    }
+
+    for (int i = 0; i < 1000; i++)
+    {
+        State *state = CreateStartState();
+
+        IrosState &ir_state = static_cast<IrosState &>(*state);
+        int hash = hasher(Prints::PrintState(ir_state));
+        if (states.insert(hash).second)
+        {
+            statesToProcessCurr.insert({hash, state});
+        }
+        else
+        {
+            //       Free(state);
+        }
+    }
+
+    for (int i = 0; i < horizon;i++)
+    {
+        for (auto & stateP : statesToProcessCurr)
+            {
+                for (int action = 0; action < Iros::NumActions(); action++)
+                {
+                    for (int sampleCount = 0; sampleCount < numOfSamplesForEachActionFromState; sampleCount++)
+                    {                 
+                        double reward;
+                        OBS_TYPE obs;
+                        int state_hash;
+                        int nextStateHash;
+                        bool isNextStateTerminal;
+                        
+                        State *next_state = Copy(stateP.second);
+                     
+                        StepForModel(*next_state, action, reward, obs, state_hash, nextStateHash, isNextStateTerminal);
+                        modelD.addSample(state_hash, nextStateHash, action, obs, reward, isNextStateTerminal);
+                        if(observations.insert(obs).second)
+                        {
+                            //std::string s = std::to_string(observations.size()-1);
+                            
+                            std::string s = Prints::PrintObs(action, obs);
+                            s.insert(0, "o_");
+                            observationsToDesc.insert({obs, s});
+                        }
+
+                        if(states.insert(nextStateHash).second)
+                        {
+                            statesToProcessNext.insert({nextStateHash, next_state});
+                        }
+                        else
+                        {
+                            Free(next_state);
+                        }
+                    }
+                } 
+            }
+
+            statesToProcessCurr.clear();
+            statesToProcessCurr.insert(statesToProcessNext.begin(), statesToProcessNext.end());
+            statesToProcessNext.clear();
+    }
+    modelD.calcModelBySamples();
+    int ii = 1;
+
+    stringstream ss;
+
+        
+
+        std::ofstream fs;
+        remove("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp");
+        fs.open("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp", std::ios_base::app); //std::ios_base::app
+        fs << "discount: 0.95" << endl;
+        fs << "values: reward" << endl;
+        
+        fs << "states:";
+        for (auto & stateN : modelD.statesToPomdpFileStates)
+        {
+            fs << " " << stateN.second ;
+        }
+        fs << endl;
+        fs << "actions: ";
+        for (auto & actD : actionsToDesc)
+        {
+            fs << actD.second << " ";
+        }
+        fs << endl;
+        
+        fs << "observations: ";
+        for (auto & obsD : observationsToDesc)
+        {
+            fs << obsD.second << " ";
+        }
+        fs << endl;
+
+        fs << endl;
+        fs << endl;
+        fs << endl;
+        for(auto & stateT : modelD.statesModel)
+        { 
+            map<int,std::set<int>> allStatePerAction;
+            for (int act = 0; act < ActionManager::actions.size();act++)
+            {
+                allStatePerAction[act] = set<int>{states};
+            }
+            for (auto &actNStateProb : stateT.second.actionNextStateProb)
+            {
+                allStatePerAction[actNStateProb.first.first].erase(actNStateProb.first.second);
+                fs << "T: " << actionsToDesc[actNStateProb.first.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << modelD.statesToPomdpFileStates[actNStateProb.first.second] << " " << std::to_string(actNStateProb.second) << endl;
+            }
+
+            for(auto &missingTrans: allStatePerAction)
+            {
+                for(auto &missingState: missingTrans.second)
+                {
+                    fs << "T: " << actionsToDesc[missingTrans.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << modelD.statesToPomdpFileStates[missingState] << " 0.0" << endl;
+                }
+                
+            }
+                }
+
+        fs << endl;
+        fs << endl;
+        fs << endl;
+
+        for(auto & stateT : modelD.statesModel)
+        {
+            
+            for (auto &actObsProb : stateT.second.actionObservationProb)
+            {
+                
+                fs << "O: " << actionsToDesc[actObsProb.first.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << observationsToDesc[actObsProb.first.second] << " " <<actObsProb.second << endl;
+            }
+            
+        }
+
+        fs << endl;
+        fs << endl;
+        fs << endl;
+
+        for(auto & rewardO : modelD.actionNextStateReward)
+        {  
+            fs << "R: " << actionsToDesc[rewardO.first.first] << " : * : " << modelD.statesToPomdpFileStates[rewardO.first.second] << " : * " << rewardO.second << endl;
+        }
+        
+
+        //Prints::PrintActionDescription(ActionManager::actions[actionId])
+        //Prints::PrintActionDescription()
+        fs << "" << endl;
+        fs << "" << endl;
+        fs << "" << endl; 
+  fs.close(); 
+
+  int aaa = 1;
+}
 
 Belief* Iros::InitialBelief(const State* start, string type) const {
-	int N = IrosBelief::num_particles;
-	vector<State*> particles(N);
+    CreateModel();
+    int N = IrosBelief::num_particles;
+    vector<State*> particles(N);
 	for (int i = 0; i < N; i++) {
         IrosBelief::currentInitParticleIndex = i;
 		particles[i] = CreateStartState();
 		particles[i]->weight = 1.0 / N;
 	}
     IrosBelief::currentInitParticleIndex = -1;
-	return new IrosBelief(particles, this);
+
+    
+    return new IrosBelief(particles, this);
 }
  
 
@@ -262,9 +545,24 @@ void Iros::Free(State* particle) const {
 int Iros::NumActiveParticles() const {
 	return memory_pool_.num_allocated();
 }
- 
+
+void Iros::StepForModel(State& state, int actionId, double& reward,
+	OBS_TYPE& observation, int &state_hash, int &next_state_hash, bool& isTerminal) const
+    {
+        IrosState &ir_state = static_cast<IrosState &>(state);
+        state_hash = hasher(Prints::PrintState(ir_state));
+
+        isTerminal = Iros::Step(state, 0.1, actionId, reward,
+                   observation);
+
+        ir_state = static_cast<IrosState &>(state);
+        next_state_hash = hasher(Prints::PrintState(ir_state)); 
+    }
+
 bool Iros::Step(State& s_state__, double rand_num, int actionId, double& reward,
 	OBS_TYPE& observation) const {
+
+
     reward = 0;
 	bool isNextStateFinal = false;
 	Random random(rand_num);
