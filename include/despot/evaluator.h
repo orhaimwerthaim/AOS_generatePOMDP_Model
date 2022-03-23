@@ -45,10 +45,82 @@ public:
 	double GetRemainingBudget(std::string instance) const;
 };
 
+
+
+
+struct policy{
+    std::string policyFile;
+    std::string currrentState;
+	std::map<std::string, std::string> obsStrToNum;
+	bool wasInit = false;
+	void init_policy()
+	{
+		if(wasInit)
+			return;
+		wasInit = true;
+		std::ifstream ifs(Globals::config.fixedPolicyDotFilePath);
+		std::string content( (std::istreambuf_iterator<char>(ifs) ),
+                       (std::istreambuf_iterator<char>()    ) );
+        policyFile = content;
+        currrentState = "root"; 
+        
+		std::ifstream pf(Globals::config.pomdpFilePath);
+		std::string pomContent( (std::istreambuf_iterator<char>(pf) ),
+                       (std::istreambuf_iterator<char>()    ) );
+
+		std::string t = "observations:  ";
+		int obsInd = pomContent.find(t) + t.size();
+		while(obsInd > t.size())
+		{
+			while(pomContent[obsInd] == ' ')
+				obsInd++;
+			if(pomContent[obsInd] == '\n')
+				break;
+			int endObs = pomContent.find(" ", obsInd);
+			obsStrToNum.insert({pomContent.substr(obsInd, endObs - obsInd), std::to_string(obsStrToNum.size())});
+			obsInd = endObs;
+		}
+	}
+
+	int getCurrentAction()
+    {
+        std::string temp = currrentState;
+            int stateInd = policyFile.find(temp.append(" ["));
+            int actStart = policyFile.find("A (", stateInd) + 3;
+            int actEnd = policyFile.find(")", actStart);
+            return stoi(policyFile.substr(actStart, actEnd - actStart)); 
+    }
+
+    void updateStateByObs(std::string obs)
+    {
+		obs=obsStrToNum[obs];
+		std::string temp = currrentState;
+		temp.append(" -> ");
+        bool found = false;
+        int stateInd=0;
+        while (stateInd >= 0)
+        {
+            stateInd = policyFile.find(temp,stateInd)+temp.size();
+            if(stateInd < temp.size())
+                throw std::runtime_error("ERROR: action that reach this State does not expect such an observation!");
+            int statrtObs = policyFile.find(" (", stateInd) + 2;
+            int endObs = policyFile.find(")", stateInd);
+
+            std::string curObs = policyFile.substr(statrtObs, endObs-statrtObs);
+            if(curObs == obs)
+            {
+                currrentState = policyFile.substr(stateInd, policyFile.find(" ", stateInd)-stateInd);
+                return;
+            }
+        }
+    } 
+};
+
+
+
 /* =============================================================================
  * Evaluator class
  * =============================================================================*/
-
 /** Interface for evaluating a solver's performance by simulating how it runs
  * in a real.
  */
@@ -57,6 +129,7 @@ class Evaluator {
 	std::vector<int> action_sequence_to_sim;
     void SaveBeliefToDB();
 protected:
+	policy fixedPolicy;
 	DSPOMDP* model_;
 	std::string belief_type_;
 	Solver* solver_;
@@ -120,7 +193,7 @@ public:
 	bool RunStep(int step, int round);
 
 	virtual double EndRound() = 0; // Return total undiscounted reward for this round.
-	virtual bool ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates) = 0;
+	virtual bool ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates, std::string& obsStr) = 0;
 	//IcapsResponseModuleAndTempEnums CalculateModuleResponse(std::string moduleName);
 	virtual void ReportStepReward();
 	virtual double End() = 0; // Free resources and return total reward collected
@@ -141,6 +214,7 @@ public:
 class POMDPEvaluator: public Evaluator {
 protected:
 	Random random_;
+	policy fixedPolicy;
 
 public:
 	POMDPEvaluator(DSPOMDP* model, std::string belief_type, Solver* solver,
@@ -155,7 +229,7 @@ public:
 	int Handshake(std::string instance);
 	void InitRound();
 	double EndRound();
-	bool ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates);
+	bool ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates, std::string& obsStr);
 	double End();
 	void UpdateTimePerMove(double step_time);
 };

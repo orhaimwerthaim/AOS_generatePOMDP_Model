@@ -22,25 +22,29 @@ struct Config {
 	bool silence;
     bool saveBeliefToDB;
     bool handsOnDebug;
-
-	Config() :
-        handsOnDebug(true),
-        solverId(1),
-		search_depth(6),
-		discount(0.95),
-		root_seed(42),
-		time_per_move(3),
-		num_scenarios(500),
-		pruning_constant(0),
-		xi(0.95),
-		sim_len(1000),
-		default_action(""),
-		max_policy_sim_len(10),
-		noise(0.1),
-		silence(false),
-		internalSimulation(true),
-        saveBeliefToDB(true)
-		{
+	bool generatePOMDP_modelFile;
+	std::string fixedPolicyDotFilePath;
+	std::string pomdpFilePath;
+	Config() : fixedPolicyDotFilePath("/home/or/Projects/sarsop/src/autoGen.dot"),
+				pomdpFilePath("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp"),
+				generatePOMDP_modelFile(true),
+			   handsOnDebug(true),
+			   solverId(1),
+			   search_depth(6),
+			   discount(0.95),
+			   root_seed(42),
+			   time_per_move(3),
+			   num_scenarios(500),
+			   pruning_constant(0),
+			   xi(0.95),
+			   sim_len(1000),
+			   default_action(""),
+			   max_policy_sim_len(10),
+			   noise(0.1),
+			   silence(false),
+			   internalSimulation(true),
+			   saveBeliefToDB(true)
+	{
 		
 	}
 };

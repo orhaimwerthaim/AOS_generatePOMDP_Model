@@ -299,63 +299,9 @@ struct model_data
       }
   };
 
-struct policy{
-    std::string policyFile;
-    std::string currrentState;
-    int currentAction;
-    policy()
-    {
-        std::ifstream ifs("/home/or/Projects/sarsop/src/autoGen.dot");
-        std::string content( (std::istreambuf_iterator<char>(ifs) ),
-                       (std::istreambuf_iterator<char>()    ) );
-        policyFile = content;
-        currrentState = "root";
-        getCurrentAction();
-        updateStateByObs("2");
-        int a=2;
-    }
-
-    int getCurrentAction()
-    {
-        std::string temp = currrentState;
-            int stateInd = policyFile.find(temp.append(" ["));
-            int actStart = policyFile.find("A (", stateInd) + 3;
-            int actEnd = policyFile.find(")", actStart);
-            return stoi(policyFile.substr(actStart, actEnd - actStart)); 
-    }
-
-    void updateStateByObs(std::string obs)
-    {
-        std::string temp = currrentState;
-        temp.append(" -> ");
-        bool found = false;
-        int stateInd=0;
-        while (stateInd >= 0)
-        {
-            stateInd = policyFile.find(temp,stateInd)+temp.size();
-            if(stateInd < temp.size())
-                throw std::runtime_error("ERROR: action that reach this State does not expect such an observation!");
-            int statrtObs = policyFile.find(" (", stateInd) + 2;
-            int endObs = policyFile.find(")", stateInd);
-
-            std::string curObs = policyFile.substr(statrtObs, endObs-statrtObs);
-            if(curObs == obs)
-            {
-                currrentState = policyFile.substr(stateInd, policyFile.find(" ", stateInd)-stateInd);
-                return;
-            }
-        }
-    }
-    void test()
-    {
-        int i = 2;
-    }
-};
 
 void Iros::CreateModel() const
-{
-    policy p;
-    p.test();
+{ 
 
     memory_pool_.DeleteAll();
     int horizon = 10;
@@ -444,8 +390,8 @@ void Iros::CreateModel() const
    
 
         std::ofstream fs;
-        remove("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp");
-        fs.open("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp", std::ios_base::app); //std::ios_base::app
+        remove(Globals::config.pomdpFilePath.c_str());
+        fs.open(Globals::config.pomdpFilePath, std::ios_base::app); //std::ios_base::app
         fs << "discount: 0.95" << endl;
         fs << "values: reward" << endl;
         
@@ -462,11 +408,17 @@ void Iros::CreateModel() const
         }
         fs << endl;
         
+        
         fs << "observations: ";
-        for (auto & obsD : observationsToDesc)
+        for (int i = 0; i < observationsToDesc.size();i++)
         {
-            fs << obsD.second << " ";
+            fs << observationsToDesc[i] << " ";
         }
+
+            // for (auto &obsD : observationsToDesc)
+            // {
+            //     fs << obsD.second << " ";
+            // }
         fs << invalidObsS << " ";
         fs << endl;
 
@@ -545,7 +497,10 @@ void Iros::CreateModel() const
 }
 
 Belief* Iros::InitialBelief(const State* start, string type) const {
-    CreateModel();
+    if(Globals::config.generatePOMDP_modelFile)
+    {
+        CreateModel();
+    }
     int N = IrosBelief::num_particles;
     vector<State*> particles(N);
 	for (int i = 0; i < N; i++) {

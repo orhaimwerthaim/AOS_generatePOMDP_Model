@@ -150,10 +150,17 @@ void Evaluator::SaveBeliefToDB()
 	}
 }
 
+
 bool Evaluator::RunStep(int step, int round) {
-    bool shutDown = false;
+	bool byExternalPolicy = true;
+	bool shutDown = false;
 	bool isFirst = false;
 	int solverId = Globals::config.solverId;
+
+	if(byExternalPolicy)
+	{
+		Evaluator::fixedPolicy.init_policy();
+	}
 
 	MongoDB_Bridge::GetSolverDetails(shutDown, isFirst, solverId);
 	if(shutDown && !Globals::config.handsOnDebug)
@@ -182,8 +189,11 @@ bool Evaluator::RunStep(int step, int round) {
 	double step_start_t = get_time_second();
     double start_t = get_time_second();
 	int action = -1;
-
-	if(action_sequence_to_sim.size() == 0)
+	if(byExternalPolicy)
+	{
+		action = Evaluator::fixedPolicy.getCurrentAction();
+	}
+	else if(action_sequence_to_sim.size() == 0)
 	{
         action = solver_->Search().action;
 	}
@@ -223,9 +233,9 @@ bool Evaluator::RunStep(int step, int round) {
 	{
 		Evaluator::SaveBeliefToDB();
 	}
-
-	bool terminal = ExecuteAction(action, reward, obs, updatesFromAction);
-    logi << endl
+	std::string obsStr;
+	bool terminal = ExecuteAction(action, reward, obs, updatesFromAction, obsStr);
+	logi << endl
 		 << "After:" << endl;
 	model_->PrintState(*state_);
 	logi << endl << "Reward:" << reward << endl <<  "Observation:" << enum_map_iros::vecResponseEnumToString[(IrosResponseModuleAndTempEnums)obs] << endl;
@@ -256,7 +266,11 @@ bool Evaluator::RunStep(int step, int round) {
 	*out_<<endl;
 
 	start_t = get_time_second();
-	if(action_sequence_to_sim.size() == 0)
+	if(byExternalPolicy)
+	{
+		Evaluator::fixedPolicy.updateStateByObs(obsStr);
+	}
+	else if(action_sequence_to_sim.size() == 0)
 	{
 		solver_->Update(action, obs);
 		//solver_->Update(action, obs, updatesFromAction);
@@ -388,7 +402,7 @@ double POMDPEvaluator::EndRound() {
 	return total_undiscounted_reward_;
 }
 
-bool POMDPEvaluator::ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates) {
+bool POMDPEvaluator::ExecuteAction(int action, double& reward, OBS_TYPE& obs, std::map<std::string, bool>& updates, std::string& obsStr) {
 	MongoDB_Bridge::currentActionSequenceId++;
 	ActionDescription &actDesc = *ActionManager::actions[action];
     ActionType acType(actDesc.actionType);
@@ -404,7 +418,7 @@ bool POMDPEvaluator::ExecuteAction(int action, double& reward, OBS_TYPE& obs, st
 	{
 		
 		terminal = model_->Step(*state_, random_num, action, reward, obs);
-		std::string obsStr = enum_map_iros::vecResponseEnumToString[(IrosResponseModuleAndTempEnums)obs];
+		obsStr = enum_map_iros::vecResponseEnumToString[(IrosResponseModuleAndTempEnums)obs];
 		MongoDB_Bridge::SaveInternalActionResponse(actionName, actionId, obsStr);
 		reward_ = reward;
 		total_discounted_reward_ += Globals::Discount(step_) * reward;
