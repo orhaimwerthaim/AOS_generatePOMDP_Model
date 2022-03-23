@@ -299,8 +299,63 @@ struct model_data
       }
   };
 
+struct policy{
+    std::string policyFile;
+    std::string currrentState;
+    int currentAction;
+    policy()
+    {
+        std::ifstream ifs("/home/or/Projects/sarsop/src/autoGen.dot");
+        std::string content( (std::istreambuf_iterator<char>(ifs) ),
+                       (std::istreambuf_iterator<char>()    ) );
+        policyFile = content;
+        currrentState = "root";
+        getCurrentAction();
+        updateStateByObs("2");
+        int a=2;
+    }
+
+    int getCurrentAction()
+    {
+        std::string temp = currrentState;
+            int stateInd = policyFile.find(temp.append(" ["));
+            int actStart = policyFile.find("A (", stateInd) + 3;
+            int actEnd = policyFile.find(")", actStart);
+            return stoi(policyFile.substr(actStart, actEnd - actStart)); 
+    }
+
+    void updateStateByObs(std::string obs)
+    {
+        std::string temp = currrentState;
+        temp.append(" -> ");
+        bool found = false;
+        int stateInd=0;
+        while (stateInd >= 0)
+        {
+            stateInd = policyFile.find(temp,stateInd)+temp.size();
+            if(stateInd < temp.size())
+                throw std::runtime_error("ERROR: action that reach this State does not expect such an observation!");
+            int statrtObs = policyFile.find(" (", stateInd) + 2;
+            int endObs = policyFile.find(")", stateInd);
+
+            std::string curObs = policyFile.substr(statrtObs, endObs-statrtObs);
+            if(curObs == obs)
+            {
+                currrentState = policyFile.substr(stateInd, policyFile.find(" ", stateInd)-stateInd);
+                return;
+            }
+        }
+    }
+    void test()
+    {
+        int i = 2;
+    }
+};
+
 void Iros::CreateModel() const
 {
+    policy p;
+    p.test();
 
     memory_pool_.DeleteAll();
     int horizon = 10;
@@ -312,7 +367,9 @@ void Iros::CreateModel() const
     std::map<int, State*> statesToProcessCurr;
     std::map<int, std::string> actionsToDesc;
     std::map<int, std::string> observationsToDesc;
-
+    std::string invalidObsS = "o_invalidObs";
+    //int invalidObs = -1;
+    //observationsToDesc.insert({invalidObs, "o_invalidObs"});
     for (int i = 0; i < ActionManager::actions.size();i++)
     {
         std::string temp = Prints::PrintActionDescription(ActionManager::actions[i]);
@@ -352,7 +409,7 @@ void Iros::CreateModel() const
                         int state_hash;
                         int nextStateHash;
                         bool isNextStateTerminal;
-                        
+
                         State *next_state = Copy(stateP.second);
                      
                         StepForModel(*next_state, action, reward, obs, state_hash, nextStateHash, isNextStateTerminal);
@@ -362,7 +419,7 @@ void Iros::CreateModel() const
                             //std::string s = std::to_string(observations.size()-1);
                             
                             std::string s = Prints::PrintObs(action, obs);
-                            s.insert(0, "o_");
+                            //s.insert(0, "o_");
                             observationsToDesc.insert({obs, s});
                         }
 
@@ -382,12 +439,9 @@ void Iros::CreateModel() const
             statesToProcessCurr.insert(statesToProcessNext.begin(), statesToProcessNext.end());
             statesToProcessNext.clear();
     }
+    
     modelD.calcModelBySamples();
-    int ii = 1;
-
-    stringstream ss;
-
-        
+   
 
         std::ofstream fs;
         remove("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp");
@@ -413,6 +467,7 @@ void Iros::CreateModel() const
         {
             fs << obsD.second << " ";
         }
+        fs << invalidObsS << " ";
         fs << endl;
 
         fs << endl;
@@ -436,25 +491,38 @@ void Iros::CreateModel() const
                 for(auto &missingState: missingTrans.second)
                 {
                     fs << "T: " << actionsToDesc[missingTrans.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << modelD.statesToPomdpFileStates[missingState] << " 0.0" << endl;
-                }
-                
+                }    
             }
                 }
 
         fs << endl;
         fs << endl;
         fs << endl;
+        //to make sure that all the stat-action pairs have observations defined.
+        map<int,std::set<int>> allStatePerAction;
+        for (int act = 0; act < ActionManager::actions.size();act++)
+        {
+            allStatePerAction[act] = set<int>{states};
+        }
 
         for(auto & stateT : modelD.statesModel)
         {
             
             for (auto &actObsProb : stateT.second.actionObservationProb)
             {
-                
+                allStatePerAction[actObsProb.first.first].erase(stateT.first);
                 fs << "O: " << actionsToDesc[actObsProb.first.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << observationsToDesc[actObsProb.first.second] << " " <<actObsProb.second << endl;
             }
-            
         }
+
+        //adding invalid observations to fill missing ones
+        for(auto &missingObss: allStatePerAction)
+            {
+                for(auto &StateWithMissingObs: missingObss.second)
+                {
+                    fs << "O: " << actionsToDesc[missingObss.first] << " : " << modelD.statesToPomdpFileStates[StateWithMissingObs] << " : " << invalidObsS << " 1.0" << endl;
+                }    
+            }
 
         fs << endl;
         fs << endl;
