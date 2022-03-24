@@ -61,6 +61,8 @@
         "forward_list": "cpp",
         "unordered_set": "cpp",
         "mutex": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "codecvt": "cpp",
+        "filesystem": "cpp"
     }
 }

@@ -10,8 +10,8 @@
 #include <cmath> 
 #include <despot/util/mongoDB_Bridge.h>
 #include <functional> //for std::hash
-#include <set>
-
+#include <set> 
+#include <unistd.h>
 using namespace std;
 
 namespace despot {
@@ -304,8 +304,8 @@ void Iros::CreateModel() const
 { 
 
     memory_pool_.DeleteAll();
-    int horizon = 10;
-    int numOfSamplesForEachActionFromState = 50;
+    int horizon = Globals::config.search_depth;
+    int numOfSamplesForEachActionFromState = Globals::config.numOfSamplesPerActionStateWhenLearningTheModel;
     model_data modelD;
     std::set<int> states;
     std::set<int> observations;
@@ -314,8 +314,7 @@ void Iros::CreateModel() const
     std::map<int, std::string> actionsToDesc;
     std::map<int, std::string> observationsToDesc;
     std::string invalidObsS = "o_invalidObs";
-    //int invalidObs = -1;
-    //observationsToDesc.insert({invalidObs, "o_invalidObs"});
+    
     for (int i = 0; i < ActionManager::actions.size();i++)
     {
         std::string temp = Prints::PrintActionDescription(ActionManager::actions[i]);
@@ -338,7 +337,7 @@ void Iros::CreateModel() const
         }
         else
         {
-            //       Free(state);
+                 //  Free(state);
         }
     }
 
@@ -388,10 +387,15 @@ void Iros::CreateModel() const
     
     modelD.calcModelBySamples();
    
-
+        char tmp[256];
+		getcwd(tmp, 256);
+		std::string workinDirPath(tmp);
+		workinDirPath = workinDirPath.substr(0, workinDirPath.find("build"));
+        std::string fpath(workinDirPath);
+        fpath.append(Globals::config.pomdpFilePath);
         std::ofstream fs;
-        remove(Globals::config.pomdpFilePath.c_str());
-        fs.open(Globals::config.pomdpFilePath, std::ios_base::app); //std::ios_base::app
+        remove(fpath.c_str());
+        fs.open(fpath, std::ios_base::app); //std::ios_base::app
         fs << "discount: 0.95" << endl;
         fs << "values: reward" << endl;
         
@@ -425,7 +429,14 @@ void Iros::CreateModel() const
         fs << endl;
         fs << endl;
         fs << endl;
-        for(auto & stateT : modelD.statesModel)
+
+        map<int, set<int>> actionStatesWithoutAnyTran;
+        for (int act = 0; act < ActionManager::actions.size();act++)
+        {
+            actionStatesWithoutAnyTran[act] = set<int>{states};
+        }
+
+        for (auto &stateT : modelD.statesModel)
         { 
             map<int,std::set<int>> allStatePerAction;
             for (int act = 0; act < ActionManager::actions.size();act++)
@@ -434,6 +445,7 @@ void Iros::CreateModel() const
             }
             for (auto &actNStateProb : stateT.second.actionNextStateProb)
             {
+                actionStatesWithoutAnyTran[actNStateProb.first.first].erase(stateT.first);
                 allStatePerAction[actNStateProb.first.first].erase(actNStateProb.first.second);
                 fs << "T: " << actionsToDesc[actNStateProb.first.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << modelD.statesToPomdpFileStates[actNStateProb.first.second] << " " << std::to_string(actNStateProb.second) << endl;
             }
@@ -445,7 +457,18 @@ void Iros::CreateModel() const
                     fs << "T: " << actionsToDesc[missingTrans.first] << " : " << modelD.statesToPomdpFileStates[stateT.first] << " : " << modelD.statesToPomdpFileStates[missingState] << " 0.0" << endl;
                 }    
             }
+        }
+ 
+
+        for(auto &actionStateWithoutAnyTranision: actionStatesWithoutAnyTran)
+                {
+                    for (auto &state:actionStateWithoutAnyTranision.second)
+                    {
+                        fs << "T: " << actionsToDesc[actionStateWithoutAnyTranision.first] << " : " << modelD.statesToPomdpFileStates[state] << " : " << modelD.statesToPomdpFileStates[state] << " 1.0" << endl;
+                    }   
                 }
+
+        
 
         fs << endl;
         fs << endl;
@@ -493,7 +516,31 @@ void Iros::CreateModel() const
         fs << "" << endl; 
   fs.close(); 
 
-  int aaa = 1;
+//after writing the .pomdp file. compile sarsop and solve the problem.
+  std::string cmd = "cd ";
+  cmd.append(workinDirPath);
+  cmd.append("sarsop/src ; make ; ./pomdpsol ");
+  cmd.append(workinDirPath);
+  cmd.append("sarsop/examples/POMDP/auto_generate.pomdp");
+  if(Globals::config.sarsopTimeLimitInSeconds > 0)
+  {
+      cmd.append(" --timeout ");
+      cmd.append(std::to_string(Globals::config.sarsopTimeLimitInSeconds));
+  }//   ./pomdpsol /home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp
+  cmd.append(" ; ./polgraph --policy-file out.policy --policy-graph autoGen.dot ");
+  cmd.append(workinDirPath);
+  cmd.append("sarsop/examples/POMDP/auto_generate.pomdp");
+
+  std::string policyFilePath(workinDirPath);
+  policyFilePath.append("sarsop/src/out.policy");
+  remove(policyFilePath.c_str());
+
+  std::string dotFilePath(workinDirPath);
+  dotFilePath.append("sarsop/src/autoGen.dot");
+  remove(dotFilePath.c_str());
+
+  system(cmd.c_str());
+  
 }
 
 Belief* Iros::InitialBelief(const State* start, string type) const {

@@ -25,12 +25,17 @@ struct Config {
 	bool generatePOMDP_modelFile;
 	std::string fixedPolicyDotFilePath;
 	std::string pomdpFilePath;
-	Config() : fixedPolicyDotFilePath("/home/or/Projects/sarsop/src/autoGen.dot"),
-				pomdpFilePath("/home/or/Projects/sarsop/examples/POMDP/auto_generate.pomdp"),
-				generatePOMDP_modelFile(true),
+	int numOfSamplesPerActionStateWhenLearningTheModel;
+	double sarsopTimeLimitInSeconds;// if sarsopTimeLimitInSeconds <= 0 there is no time limit.
+	Config() : 
+	sarsopTimeLimitInSeconds(20),
+	numOfSamplesPerActionStateWhenLearningTheModel(200),
+			   fixedPolicyDotFilePath("sarsop/src/autoGen.dot"), //the path ../sarsop/src/autoGen.dot because working dir is /build/ so we need go one directory backwards.
+			   pomdpFilePath("sarsop/examples/POMDP/auto_generate.pomdp"),
+			   generatePOMDP_modelFile(true),
 			   handsOnDebug(true),
 			   solverId(1),
-			   search_depth(6),
+			   search_depth(3),
 			   discount(0.95),
 			   root_seed(42),
 			   time_per_move(3),
@@ -44,8 +49,7 @@ struct Config {
 			   silence(false),
 			   internalSimulation(true),
 			   saveBeliefToDB(true)
-	{
-		
+	{ 		
 	}
 };
 

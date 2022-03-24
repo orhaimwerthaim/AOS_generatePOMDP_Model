@@ -6,6 +6,7 @@
 #include <despot/pomdpx/pomdpx.h>
 #include <despot/util/util.h>
 #include <despot/model_primitives/iros/enum_map_iros.h>
+#include <unistd.h>
 namespace despot {
 
 /* =============================================================================
@@ -58,13 +59,22 @@ struct policy{
 		if(wasInit)
 			return;
 		wasInit = true;
-		std::ifstream ifs(Globals::config.fixedPolicyDotFilePath);
+
+		char tmp[256];
+		getcwd(tmp, 256);
+		std::string workingDirPath(tmp);
+		workingDirPath = workingDirPath.substr(0, workingDirPath.find("build"));
+		std::string policyFilePath(workingDirPath);
+		policyFilePath.append(Globals::config.fixedPolicyDotFilePath);
+		std::ifstream ifs(policyFilePath);
 		std::string content( (std::istreambuf_iterator<char>(ifs) ),
                        (std::istreambuf_iterator<char>()    ) );
         policyFile = content;
-        currrentState = "root"; 
         
-		std::ifstream pf(Globals::config.pomdpFilePath);
+		currrentState = "root"; 
+        std::string pomdpFilePath(workingDirPath);
+		pomdpFilePath.append(Globals::config.pomdpFilePath);
+		std::ifstream pf(pomdpFilePath);
 		std::string pomContent( (std::istreambuf_iterator<char>(pf) ),
                        (std::istreambuf_iterator<char>()    ) );
 
